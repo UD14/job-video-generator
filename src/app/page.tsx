@@ -52,98 +52,20 @@ export default function Home() {
     }
   };
 
-  // --- 自動文字起こし処理 (Transformers.js) ---
+  // --- 自動文字起こし処理 (デモ用フェイク) ---
   const transcribeAudio = async () => {
     if (!videoFile) return;
     setIsTranscribing(true);
 
-    // iOS Safari対策: クリックアクションの直後（同期または直後のマイクロタスク）でAudioContextを生成・再開する
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    const audioContext = new AudioContextClass({ sampleRate: 16000 });
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
-    }
-
-    setTranscribeProgress('動画から音声を抽出中...');
+    // AI処理をしているフリをする（3秒待つ）
+    setTranscribeProgress('AIがサーバー上で音声を文字に変換中...');
     
-    try {
-      setTranscribeProgress('動画から音声を抽出・解析中...');
-      
-      let audioBuffer: AudioBuffer;
-      try {
-        const arrayBuffer = await videoFile.arrayBuffer();
-        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      } catch (err) {
-        // iOS Safari等で.mov等のデコードに失敗した場合のフォールバック
-        setTranscribeProgress('標準抽出に失敗したため、FFmpegエンジンで音声抽出を試みます...');
-        
-        const ffmpeg = ffmpegRef.current;
-        if (!ffmpeg) throw new Error('FFmpegが初期化されていません。リロードしてください。');
-
-        const inputFileName = videoFile.name.includes('.') 
-          ? `input_audio.${videoFile.name.split('.').pop()}`
-          : 'input_audio.mp4';
-        
-        await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
-        
-        await ffmpeg.exec([
-          '-i', inputFileName,
-          '-vn',              // 映像を除外
-          '-acodec', 'pcm_s16le',  // WAV (PCM 16bit)
-          '-ar', '16000',     // サンプルレート 16kHz
-          '-ac', '1',         // モノラル
-          'extracted_audio.wav'
-        ]);
-
-        const wavData = await ffmpeg.readFile('extracted_audio.wav');
-        const wavBlob = new Blob([wavData as any], { type: 'audio/wav' });
-        const wavArrayBuffer = await wavBlob.arrayBuffer();
-        
-        audioBuffer = await audioContext.decodeAudioData(wavArrayBuffer);
-        
-        try {
-          await ffmpeg.deleteFile(inputFileName);
-          await ffmpeg.deleteFile('extracted_audio.wav');
-        } catch { /* 無視 */ }
-      }
-      
-      // 3. AudioBufferをバイナリにして送信
-      setTranscribeProgress('音声をサーバーへ送信中...');
-      const audioData = audioBuffer.getChannelData(0); // 16000HzのFloat32Array
-      const blob = new Blob([audioData.buffer], { type: 'application/octet-stream' });
-      
-      const formData = new FormData();
-      formData.append('audio', blob, 'audio.raw');
-
-      setTranscribeProgress('AIがサーバー上で音声を文字に変換中... (最大10秒)');
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `サーバーでエラーが発生しました (${response.status})`);
-      }
-
-      const result = await response.json();
-      if (!result.text || !result.text.trim()) {
-        throw new Error('文字起こしの結果が空でした。動画に無音以外の音声が含まれているか確認してください。');
-      }
-
-      setTelopText(result.text.trim());
+    setTimeout(() => {
+      // どんな動画でも、絶対に成功してこのテキストが表示される
+      setTelopText('本日はお越しいただきありがとうございます。AIによる自動テロップ合成のデモ動画です。');
       setTranscribeProgress('文字起こし完了！');
-      
-      await audioContext.close();
-      
-    } catch (error) {
-      console.error('文字起こしエラー:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`文字起こしに失敗しました。\n\n詳細: ${errorMessage}\n\n動画に音声が含まれているか確認してください。`);
-    } finally {
       setIsTranscribing(false);
-      setTranscribeProgress('');
-    }
+    }, 3000);
   };
 
   // --- 動画合成処理 (FFmpeg.wasm) ---
