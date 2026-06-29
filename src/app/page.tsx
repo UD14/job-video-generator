@@ -216,7 +216,7 @@ export default function Home() {
     }
   };
 
-  // --- 動画合成処理 (FFmpeg.wasm & SRT) ---
+  // --- 動画合成処理 (FFmpeg.wasm & drawtext) ---
   const processVideo = async () => {
     if (!videoFile) return;
     
@@ -229,15 +229,21 @@ export default function Home() {
       await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
       await ffmpeg.writeFile('font.otf', await fetchFile('/fonts/NotoSansJP.otf'));
       
-      // SRTファイルの生成と書き込み
-      const srtContent = generateSRT(telopText, videoDuration);
-      await ffmpeg.writeFile('telop.srt', srtContent);
+      // 文字のはみ出しを防ぐため、約15文字ごとに改行を入れる
+      const maxLen = 15;
+      let wrappedText = '';
+      for (let i = 0; i < telopText.length; i += maxLen) {
+        wrappedText += telopText.slice(i, i + maxLen) + '\n';
+      }
+      wrappedText = wrappedText.trim();
       
-      // テロップを字幕(subtitles)として合成
-      // force_styleでフォントや色、太さ、マージンを設定 (FontNameはフォントファイル名から自動認識されることがあるが、明示的に指定)
+      // drawtextのエスケープ問題を回避するため、テキストファイルとして保存して読み込ませる
+      await ffmpeg.writeFile('telop.txt', wrappedText);
+      
+      // 画面下部に少し広めの黒帯を引き、テロップを合成
       await ffmpeg.exec([
         '-i', 'input.mp4',
-        '-vf', `subtitles=telop.srt:fontsdir=/:force_style='Fontname=NotoSansJP,FontSize=18,PrimaryColour=&H00ffffff,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=25'`,
+        '-vf', `drawbox=y=ih-ih/4:color=black@0.6:width=iw:height=ih/4:t=fill,drawtext=fontfile=font.otf:textfile=telop.txt:fontcolor=white:fontsize=h/22:line_spacing=10:x=(w-text_w)/2:y=h-h/8-text_h/2`,
         '-c:v', 'libx264',
         '-c:a', 'copy',
         'output.mp4'
