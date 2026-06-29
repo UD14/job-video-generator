@@ -200,7 +200,7 @@ export default function Home() {
         setTelopText(result.text.trim());
       } catch (apiError) {
         console.warn('Hugging Face API通信エラー。安全装置（デモテキスト）を作動させます:', apiError);
-        const fallbackText = "本日はデモンストレーションをご覧いただき、誠にありがとうございます。このように、AIを活用することで、動画の音声を自動で認識し、テロップとして合成することが可能になります。";
+        const fallbackText = "これは自動テロップ合成ツールのデモンストレーションです。AIが動画の音声を認識し、このように完璧なタイミングで字幕を生成します。長い文章でも画面からはみ出ることなく、読みやすい長さで綺麗に表示されます。";
         setTelopText(fallbackText);
       }
 
