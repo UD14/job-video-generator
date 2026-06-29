@@ -107,52 +107,34 @@ export default function Home() {
         } catch { /* 無視 */ }
       }
       
-      const audioData = audioBuffer.getChannelData(0); // Float32Array (モノラル)
+      // 3. AudioBufferをバイナリにして送信
+      setTranscribeProgress('音声をサーバーへ送信中...');
+      const audioData = audioBuffer.getChannelData(0); // 16000HzのFloat32Array
+      const blob = new Blob([audioData.buffer], { type: 'application/octet-stream' });
+      
+      const formData = new FormData();
+      formData.append('audio', blob, 'audio.raw');
+
+      setTranscribeProgress('AIがサーバー上で音声を文字に変換中... (最大10秒)');
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `サーバーでエラーが発生しました (${response.status})`);
+      }
+
+      const result = await response.json();
+      if (!result.text || !result.text.trim()) {
+        throw new Error('文字起こしの結果が空でした。動画に無音以外の音声が含まれているか確認してください。');
+      }
+
+      setTelopText(result.text.trim());
+      setTranscribeProgress('文字起こし完了！');
+      
       await audioContext.close();
-
-      // 4. Transformers.jsのWhisperモデルをロード（初回のみダウンロード）
-      setTranscribeProgress('AIモデルを準備中... (初回はダウンロードに時間がかかります)');
-      const { pipeline, env } = await import('@huggingface/transformers');
-      env.allowLocalModels = false;
-      
-      // iOS Safariでのメモリ不足やクラッシュを回避するため、WASMの実行スレッドを1に制限
-      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
-        env.backends.onnx.wasm.numThreads = 1;
-      }
-
-      const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-        device: 'wasm',
-        dtype: 'fp32', // 重要: q8でもiOS Safariでqdq_actions.ccエラーが起きるため、量子化を一切含まないfp32を強制
-        progress_callback: (info: any) => {
-          if (info.status === 'progress') {
-            setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
-          }
-        }
-      });
-
-      // 5. 推論の実行
-      setTranscribeProgress('AIが音声を文字に変換中...');
-      const output = await transcriber(audioData, {
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        language: 'japanese',
-        task: 'transcribe',
-      });
-
-      // 6. 結果をテキストボックスに反映
-      let transcribedText = '';
-      if (Array.isArray(output)) {
-        transcribedText = output.map(chunk => chunk.text).join(' ');
-      } else {
-        transcribedText = (output as any).text;
-      }
-      
-      const trimmed = transcribedText.trim();
-      if (trimmed) {
-        setTelopText(trimmed);
-      } else {
-        alert('音声が検出されませんでした。動画に音声が含まれているか確認してください。');
-      }
       
     } catch (error) {
       console.error('文字起こしエラー:', error);
