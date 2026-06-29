@@ -56,30 +56,61 @@ export default function Home() {
   const transcribeAudio = async () => {
     if (!videoFile) return;
     setIsTranscribing(true);
-    setTranscribeProgress('AIモデルを準備中... (初回はダウンロードに時間がかかります)');
+    setTranscribeProgress('動画から音声を抽出中...');
     
     try {
-      // サーバーサイド(Node.js)でのエラーを回避するため、クリック時に動的インポート
+      const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg) throw new Error('FFmpegが初期化されていません');
+
+      // 1. FFmpeg.wasmで動画から音声をWAV(16kHz, モノラル)に抽出
+      //    これにより、iPhone(.mov/HEVC)を含むあらゆる動画形式に対応する
+      const inputFileName = videoFile.name.includes('.') 
+        ? `input_audio.${videoFile.name.split('.').pop()}`
+        : 'input_audio.mp4';
+      
+      await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
+      
+      await ffmpeg.exec([
+        '-i', inputFileName,
+        '-vn',              // 映像を除外
+        '-acodec', 'pcm_s16le',  // WAV (PCM 16bit)
+        '-ar', '16000',     // サンプルレート 16kHz（Whisperの要求仕様）
+        '-ac', '1',         // モノラル
+        'extracted_audio.wav'
+      ]);
+
+      // 2. WAVファイルを読み取って AudioContext でデコード
+      setTranscribeProgress('音声データを解析準備中...');
+      const wavData = await ffmpeg.readFile('extracted_audio.wav');
+      const wavBlob = new Blob([wavData as any], { type: 'audio/wav' });
+      const wavArrayBuffer = await wavBlob.arrayBuffer();
+
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const audioBuffer = await audioContext.decodeAudioData(wavArrayBuffer);
+      const audioData = audioBuffer.getChannelData(0); // Float32Array (モノラル)
+      await audioContext.close();
+
+      // 3. FFmpeg仮想FS上の一時ファイルを削除（メモリ節約）
+      try {
+        await ffmpeg.deleteFile(inputFileName);
+        await ffmpeg.deleteFile('extracted_audio.wav');
+      } catch { /* 無視 */ }
+
+      // 4. Transformers.jsのWhisperモデルをロード（初回のみダウンロード）
+      setTranscribeProgress('AIモデルを準備中... (初回はダウンロードに時間がかかります)');
       const { pipeline, env } = await import('@huggingface/transformers');
       env.allowLocalModels = false;
 
-      // 1. Web Audio APIを使って動画から音声を抽出・デコード
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const arrayBuffer = await videoFile.arrayBuffer();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      const audioData = audioBuffer.getChannelData(0); // モノラルのFloat32Array
-
-      // 2. Whisperモデルのロード (ブラウザ上で実行)
       const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
         progress_callback: (info: any) => {
           if (info.status === 'progress') {
-            setTranscribeProgress(`モデル準備中: ${Math.round(info.progress)}%`);
+            setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
           }
         }
       });
 
-      // 3. 推論の実行
-      setTranscribeProgress('音声を解析中...');
+      // 5. 推論の実行
+      setTranscribeProgress('AIが音声を文字に変換中...');
       const output = await transcriber(audioData, {
         chunk_length_s: 30,
         stride_length_s: 5,
@@ -87,7 +118,7 @@ export default function Home() {
         task: 'transcribe',
       });
 
-      // 4. 結果をテキストボックスに反映
+      // 6. 結果をテキストボックスに反映
       let transcribedText = '';
       if (Array.isArray(output)) {
         transcribedText = output.map(chunk => chunk.text).join(' ');
@@ -95,11 +126,17 @@ export default function Home() {
         transcribedText = (output as any).text;
       }
       
-      setTelopText(transcribedText.trim());
+      const trimmed = transcribedText.trim();
+      if (trimmed) {
+        setTelopText(trimmed);
+      } else {
+        alert('音声が検出されませんでした。動画に音声が含まれているか確認してください。');
+      }
       
     } catch (error) {
-      console.error(error);
-      alert('文字起こしに失敗しました。動画の形式がサポートされていない可能性があります。');
+      console.error('文字起こしエラー:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`文字起こしに失敗しました。\n\n詳細: ${errorMessage}\n\n動画に音声が含まれているか確認してください。`);
     } finally {
       setIsTranscribing(false);
       setTranscribeProgress('');
