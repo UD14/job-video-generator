@@ -59,42 +59,22 @@ export default function Home() {
     setTranscribeProgress('動画から音声を抽出中...');
     
     try {
-      const ffmpeg = ffmpegRef.current;
-      if (!ffmpeg) throw new Error('FFmpegが初期化されていません');
-
-      // 1. FFmpeg.wasmで動画から音声をWAV(16kHz, モノラル)に抽出
-      //    これにより、iPhone(.mov/HEVC)を含むあらゆる動画形式に対応する
-      const inputFileName = videoFile.name.includes('.') 
-        ? `input_audio.${videoFile.name.split('.').pop()}`
-        : 'input_audio.mp4';
+      // 1. Web Audio APIを使って動画ファイルから直接音声を抽出・デコードする
+      // FFmpegを使用しないことで、ブラウザが対応している全形式から高速に音声を抽出できる
+      setTranscribeProgress('動画から音声を抽出・解析中...');
       
-      await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
-      
-      await ffmpeg.exec([
-        '-i', inputFileName,
-        '-vn',              // 映像を除外
-        '-acodec', 'pcm_s16le',  // WAV (PCM 16bit)
-        '-ar', '16000',     // サンプルレート 16kHz（Whisperの要求仕様）
-        '-ac', '1',         // モノラル
-        'extracted_audio.wav'
-      ]);
-
-      // 2. WAVファイルを読み取って AudioContext でデコード
-      setTranscribeProgress('音声データを解析準備中...');
-      const wavData = await ffmpeg.readFile('extracted_audio.wav');
-      const wavBlob = new Blob([wavData as any], { type: 'audio/wav' });
-      const wavArrayBuffer = await wavBlob.arrayBuffer();
-
+      const arrayBuffer = await videoFile.arrayBuffer();
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const audioBuffer = await audioContext.decodeAudioData(wavArrayBuffer);
+      
+      let audioBuffer: AudioBuffer;
+      try {
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      } catch (err) {
+        throw new Error('動画の形式がサポートされていない可能性があります。別の形式の動画をお試しください。');
+      }
+      
       const audioData = audioBuffer.getChannelData(0); // Float32Array (モノラル)
       await audioContext.close();
-
-      // 3. FFmpeg仮想FS上の一時ファイルを削除（メモリ節約）
-      try {
-        await ffmpeg.deleteFile(inputFileName);
-        await ffmpeg.deleteFile('extracted_audio.wav');
-      } catch { /* 無視 */ }
 
       // 4. Transformers.jsのWhisperモデルをロード（初回のみダウンロード）
       setTranscribeProgress('AIモデルを準備中... (初回はダウンロードに時間がかかります)');
