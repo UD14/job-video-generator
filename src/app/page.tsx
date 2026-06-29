@@ -127,7 +127,7 @@ export default function Home() {
             setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
           }
         }
-      });
+      } as any);
 
       // 5. 推論の実行
       setTranscribeProgress('AIが音声を文字に変換中...');
