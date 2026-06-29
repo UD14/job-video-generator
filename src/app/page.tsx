@@ -122,7 +122,7 @@ export default function Home() {
 
       const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
         device: 'wasm',
-        dtype: 'q8', // 重要: v4デフォルトのq4量子化がiOS Safariでqdq_actions.ccエラーを起こすため、q8を明示的に指定
+        dtype: 'fp32', // 重要: q8でもiOS Safariでqdq_actions.ccエラーが起きるため、量子化を一切含まないfp32を強制
         progress_callback: (info: any) => {
           if (info.status === 'progress') {
             setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
