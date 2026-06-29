@@ -3,17 +3,96 @@
 import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { HfInference } from '@huggingface/inference';
+
+// --- ユーティリティ関数 ---
+
+// AudioBuffer を WAV Blob に変換する関数
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numOfChan = buffer.numberOfChannels;
+  const length = buffer.length * numOfChan * 2 + 44;
+  const bufferArray = new ArrayBuffer(length);
+  const view = new DataView(bufferArray);
+  const channels = [];
+  let sample = 0;
+  let offset = 0;
+  let pos = 0;
+
+  const setUint16 = (data: number) => { view.setUint16(pos, data, true); pos += 2; };
+  const setUint32 = (data: number) => { view.setUint32(pos, data, true); pos += 4; };
+
+  setUint32(0x46464952); // "RIFF"
+  setUint32(length - 8); // file length - 8
+  setUint32(0x45564157); // "WAVE"
+  setUint32(0x20746d66); // "fmt " chunk
+  setUint32(16); // length = 16
+  setUint16(1); // PCM (uncompressed)
+  setUint16(numOfChan);
+  setUint32(buffer.sampleRate);
+  setUint32(buffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+  setUint16(numOfChan * 2); // block-align
+  setUint16(16); // 16-bit
+  setUint32(0x61746164); // "data" - chunk
+  setUint32(length - pos - 4); // chunk length
+
+  for (let i = 0; i < buffer.numberOfChannels; i++) {
+    channels.push(buffer.getChannelData(i));
+  }
+
+  while (pos < length) {
+    for (let i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+      view.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  return new Blob([bufferArray], { type: 'audio/wav' });
+}
+
+// テキストと秒数からSRT字幕文字列を生成する関数
+function generateSRT(text: string, durationSec: number): string {
+  const chunkSize = 15; // 15文字ごとに分割して字幕を切り替える
+  const chunks = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+
+  if (chunks.length === 0) return '';
+
+  const timePerChunk = durationSec / chunks.length;
+  let srtContent = '';
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
+  };
+
+  for (let i = 0; i < chunks.length; i++) {
+    const start = formatTime(i * timePerChunk);
+    const end = formatTime((i + 1) * timePerChunk);
+    srtContent += `${i + 1}\n${start} --> ${end}\n${chunks[i]}\n\n`;
+  }
+
+  return srtContent;
+}
+
 
 export default function Home() {
   const [loaded, setLoaded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   
-  // 文字起こし用の状態
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeProgress, setTranscribeProgress] = useState('');
 
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoDuration, setVideoDuration] = useState<number>(10);
   const [telopText, setTelopText] = useState('ここに入力した文字がテロップになります');
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   
@@ -21,7 +100,6 @@ export default function Home() {
   const messageRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
-    // クライアントサイドでのみFFmpegをインスタンス化
     ffmpegRef.current = new FFmpeg();
     load();
   }, []);
@@ -52,23 +130,87 @@ export default function Home() {
     }
   };
 
-  // --- 自動文字起こし処理 (デモ用フェイク) ---
+  // --- 自動文字起こし処理 (HuggingFace Inference API) ---
   const transcribeAudio = async () => {
     if (!videoFile) return;
     setIsTranscribing(true);
 
-    // AI処理をしているフリをする（3秒待つ）
-    setTranscribeProgress('AIがサーバー上で音声を文字に変換中...');
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass({ sampleRate: 16000 });
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    setTranscribeProgress('動画から音声を抽出中...');
     
-    setTimeout(() => {
-      // どんな動画でも、絶対に成功してこのテキストが表示される
-      setTelopText('本日はお越しいただきありがとうございます。AIによる自動テロップ合成のデモ動画です。');
+    try {
+      let audioBuffer: AudioBuffer;
+      try {
+        const arrayBuffer = await videoFile.arrayBuffer();
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      } catch (err) {
+        setTranscribeProgress('標準抽出に失敗したため、FFmpegエンジンで音声抽出を試みます...');
+        
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error('FFmpegが初期化されていません。リロードしてください。');
+
+        const inputFileName = videoFile.name.includes('.') 
+          ? `input_audio.${videoFile.name.split('.').pop()}`
+          : 'input_audio.mp4';
+        
+        await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
+        
+        await ffmpeg.exec([
+          '-i', inputFileName,
+          '-vn',
+          '-acodec', 'pcm_s16le',
+          '-ar', '16000',
+          '-ac', '1',
+          'extracted_audio.wav'
+        ]);
+
+        const wavData = await ffmpeg.readFile('extracted_audio.wav');
+        const wavBlob = new Blob([wavData as any], { type: 'audio/wav' });
+        const wavArrayBuffer = await wavBlob.arrayBuffer();
+        
+        audioBuffer = await audioContext.decodeAudioData(wavArrayBuffer);
+        
+        try {
+          await ffmpeg.deleteFile(inputFileName);
+          await ffmpeg.deleteFile('extracted_audio.wav');
+        } catch { /* 無視 */ }
+      }
+      
+      setVideoDuration(audioBuffer.duration);
+      const wavBlob = audioBufferToWav(audioBuffer);
+      await audioContext.close();
+      
+      setTranscribeProgress('AIクラウド(Hugging Face)に音声を送信中...');
+      
+      const hf = new HfInference();
+      const result = await hf.automaticSpeechRecognition({
+        model: 'openai/whisper-tiny',
+        data: wavBlob,
+      });
+
+      if (!result || !result.text || !result.text.trim()) {
+        throw new Error('文字起こしの結果が空でした。');
+      }
+
+      setTelopText(result.text.trim());
       setTranscribeProgress('文字起こし完了！');
+      
+    } catch (error) {
+      console.error('文字起こしエラー:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`文字起こしに失敗しました。\n\n詳細: ${errorMessage}`);
+    } finally {
       setIsTranscribing(false);
-    }, 3000);
+      setTranscribeProgress('');
+    }
   };
 
-  // --- 動画合成処理 (FFmpeg.wasm) ---
+  // --- 動画合成処理 (FFmpeg.wasm & SRT) ---
   const processVideo = async () => {
     if (!videoFile) return;
     
@@ -81,12 +223,15 @@ export default function Home() {
       await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
       await ffmpeg.writeFile('font.otf', await fetchFile('/fonts/NotoSansJP.otf'));
       
-      const escapedText = telopText.replace(/'/g, "\u2019").replace(/:/g, "\\:");
-
-      // 画面下部に帯を引き、テロップを合成
+      // SRTファイルの生成と書き込み
+      const srtContent = generateSRT(telopText, videoDuration);
+      await ffmpeg.writeFile('telop.srt', srtContent);
+      
+      // テロップを字幕(subtitles)として合成
+      // force_styleでフォントや色、太さ、マージンを設定 (FontNameはフォントファイル名から自動認識されることがあるが、明示的に指定)
       await ffmpeg.exec([
         '-i', 'input.mp4',
-        '-vf', `drawbox=y=ih-ih/5:color=black@0.6:width=iw:height=ih/5:t=fill,drawtext=fontfile=font.otf:text='${escapedText}':fontcolor=white:fontsize=h/20:x=(w-text_w)/2:y=h-h/10-text_h/2`,
+        '-vf', `subtitles=telop.srt:fontsdir=/:force_style='Fontname=NotoSansJP,FontSize=18,PrimaryColour=&H00ffffff,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=25'`,
         '-c:v', 'libx264',
         '-c:a', 'copy',
         'output.mp4'
@@ -140,7 +285,7 @@ export default function Home() {
               {/* 2. AI文字起こし */}
               <div className="pt-4 border-t border-blue-200">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-semibold">2. 自動文字起こし (オプション)</label>
+                  <label className="block text-sm font-semibold">2. 自動文字起こし (Hugging Face API)</label>
                   <button
                     onClick={transcribeAudio}
                     disabled={!videoFile || isTranscribing}
@@ -154,7 +299,7 @@ export default function Home() {
                   <p className="text-xs text-purple-600 mb-2">{transcribeProgress}</p>
                 )}
                 <p className="text-xs text-gray-500 mb-2">
-                  ※ブラウザ内でAIが動くため無料・安全ですが、精度が低めなので手直しが必要です。
+                  ※Hugging Faceの無料APIサーバーを使用して安全に文字起こしを行います。
                 </p>
                 <textarea 
                   value={telopText}
