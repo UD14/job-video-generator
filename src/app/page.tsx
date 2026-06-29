@@ -56,21 +56,55 @@ export default function Home() {
   const transcribeAudio = async () => {
     if (!videoFile) return;
     setIsTranscribing(true);
+
+    // iOS Safari対策: クリックアクションの直後（同期または直後のマイクロタスク）でAudioContextを生成・再開する
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass({ sampleRate: 16000 });
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
     setTranscribeProgress('動画から音声を抽出中...');
     
     try {
-      // 1. Web Audio APIを使って動画ファイルから直接音声を抽出・デコードする
-      // FFmpegを使用しないことで、ブラウザが対応している全形式から高速に音声を抽出できる
       setTranscribeProgress('動画から音声を抽出・解析中...');
-      
-      const arrayBuffer = await videoFile.arrayBuffer();
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       
       let audioBuffer: AudioBuffer;
       try {
+        const arrayBuffer = await videoFile.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       } catch (err) {
-        throw new Error('動画の形式がサポートされていない可能性があります。別の形式の動画をお試しください。');
+        // iOS Safari等で.mov等のデコードに失敗した場合のフォールバック
+        setTranscribeProgress('標準抽出に失敗したため、FFmpegエンジンで音声抽出を試みます...');
+        
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error('FFmpegが初期化されていません。リロードしてください。');
+
+        const inputFileName = videoFile.name.includes('.') 
+          ? `input_audio.${videoFile.name.split('.').pop()}`
+          : 'input_audio.mp4';
+        
+        await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
+        
+        await ffmpeg.exec([
+          '-i', inputFileName,
+          '-vn',              // 映像を除外
+          '-acodec', 'pcm_s16le',  // WAV (PCM 16bit)
+          '-ar', '16000',     // サンプルレート 16kHz
+          '-ac', '1',         // モノラル
+          'extracted_audio.wav'
+        ]);
+
+        const wavData = await ffmpeg.readFile('extracted_audio.wav');
+        const wavBlob = new Blob([wavData as any], { type: 'audio/wav' });
+        const wavArrayBuffer = await wavBlob.arrayBuffer();
+        
+        audioBuffer = await audioContext.decodeAudioData(wavArrayBuffer);
+        
+        try {
+          await ffmpeg.deleteFile(inputFileName);
+          await ffmpeg.deleteFile('extracted_audio.wav');
+        } catch { /* 無視 */ }
       }
       
       const audioData = audioBuffer.getChannelData(0); // Float32Array (モノラル)
