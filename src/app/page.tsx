@@ -114,8 +114,14 @@ export default function Home() {
       setTranscribeProgress('AIモデルを準備中... (初回はダウンロードに時間がかかります)');
       const { pipeline, env } = await import('@huggingface/transformers');
       env.allowLocalModels = false;
+      
+      // iOS Safariでのメモリ不足やクラッシュを回避するため、WASMの実行スレッドを1に制限
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        env.backends.onnx.wasm.numThreads = 1;
+      }
 
       const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+        quantized: false, // 重要: iOS Safariで発生するONNXの量子化エラー(qdq_actions.cc)を回避するため非量子化モデルを使用
         progress_callback: (info: any) => {
           if (info.status === 'progress') {
             setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
