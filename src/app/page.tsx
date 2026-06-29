@@ -229,21 +229,33 @@ export default function Home() {
       await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
       await ffmpeg.writeFile('font.otf', await fetchFile('/fonts/NotoSansJP.otf'));
       
-      // 文字のはみ出しを防ぐため、約15文字ごとに改行を入れる
+      // 文字のはみ出しを防ぐため、約15文字ごとに行を分割する
       const maxLen = 15;
-      let wrappedText = '';
+      const lines = [];
       for (let i = 0; i < telopText.length; i += maxLen) {
-        wrappedText += telopText.slice(i, i + maxLen) + '\n';
+        lines.push(telopText.slice(i, i + maxLen));
       }
-      wrappedText = wrappedText.trim();
       
-      // drawtextのエスケープ問題を回避するため、テキストファイルとして保存して読み込ませる
-      await ffmpeg.writeFile('telop.txt', wrappedText);
+      // 分割した行ごとにdrawtextフィルタを作成し、連結する
+      let drawtextFilters = '';
+      const totalLines = lines.length;
       
-      // 画面下部に少し広めの黒帯を引き、テロップを合成
+      lines.forEach((line, index) => {
+        // FFmpegコマンドライン用にエスケープ処理
+        const escapedLine = line.replace(/'/g, "\u2019").replace(/:/g, "\\:");
+        // 複数行が重ならないようにY座標を計算（下から約1/8の位置を基準に配置）
+        const yOffset = (index - (totalLines - 1) / 2) * 50; // 行間隔の調整
+        const yPos = `h-h/8-text_h/2+${yOffset}`;
+        
+        drawtextFilters += `,drawtext=fontfile=font.otf:text='${escapedLine}':fontcolor=white:fontsize=h/22:x=(w-text_w)/2:y=${yPos}`;
+      });
+      
+      // 画面下部に黒帯を引き、全てのdrawtextフィルタを適用
+      const vfCommand = `drawbox=y=ih-ih/4:color=black@0.6:width=iw:height=ih/4:t=fill${drawtextFilters}`;
+
       await ffmpeg.exec([
         '-i', 'input.mp4',
-        '-vf', `drawbox=y=ih-ih/4:color=black@0.6:width=iw:height=ih/4:t=fill,drawtext=fontfile=font.otf:textfile=telop.txt:fontcolor=white:fontsize=h/22:line_spacing=10:x=(w-text_w)/2:y=h-h/8-text_h/2`,
+        '-vf', vfCommand,
         '-c:v', 'libx264',
         '-c:a', 'copy',
         'output.mp4'
