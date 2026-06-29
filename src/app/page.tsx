@@ -121,13 +121,14 @@ export default function Home() {
       }
 
       const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-        quantized: false, // 重要: iOS Safariで発生するONNXの量子化エラー(qdq_actions.cc)を回避するため非量子化モデルを使用
+        device: 'wasm',
+        dtype: 'q8', // 重要: v4デフォルトのq4量子化がiOS Safariでqdq_actions.ccエラーを起こすため、q8を明示的に指定
         progress_callback: (info: any) => {
           if (info.status === 'progress') {
             setTranscribeProgress(`AIモデルをダウンロード中: ${Math.round(info.progress)}%`);
           }
         }
-      } as any);
+      });
 
       // 5. 推論の実行
       setTranscribeProgress('AIが音声を文字に変換中...');
