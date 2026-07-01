@@ -330,7 +330,7 @@ export default function Home() {
                   <p className="text-xs text-purple-600 mb-2">{transcribeProgress}</p>
                 )}
                 <p className="text-xs text-gray-500 mb-2">
-                  ※Hugging Faceの無料APIサーバーを使用して安全に文字起こしを行います。
+                  ※超高速AIプロセッサ(Groq LPU)を使用して安全に文字起こしを行います。
                 </p>
                 <textarea 
                   value={telopText}
