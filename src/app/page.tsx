@@ -330,7 +330,7 @@ export default function Home() {
                   <p className="text-xs text-purple-600 mb-2">{transcribeProgress}</p>
                 )}
                 <p className="text-xs text-gray-500 mb-2">
-                  ※超高速AIプロセッサ(Groq LPU)を使用して安全に文字起こしを行います。
+                  ※アップロードされた動画や音声データは文字起こし専用のセキュアなサーバーで処理され、外部に公開・保存・流出されることは一切ありません。
                 </p>
                 <textarea 
                   value={telopText}
