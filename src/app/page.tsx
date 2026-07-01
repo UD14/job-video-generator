@@ -239,8 +239,8 @@ export default function Home() {
       await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
       await ffmpeg.writeFile('font.otf', await fetchFile('/fonts/NotoSansJP.otf'));
       
-      // 文字のはみ出しを防ぐため、約15文字ごとに行を分割する
-      const maxLen = 15;
+      // 文字のはみ出しを防ぐため、縦動画でも安全な「12文字」ごとに行を分割する
+      const maxLen = 12;
       const lines = [];
       for (let i = 0; i < telopText.length; i += maxLen) {
         lines.push(telopText.slice(i, i + maxLen));
@@ -253,11 +253,12 @@ export default function Home() {
       lines.forEach((line, index) => {
         // FFmpegコマンドライン用にエスケープ処理
         const escapedLine = line.replace(/'/g, "\u2019").replace(/:/g, "\\:");
-        // 複数行が重ならないようにY座標を計算（下から約1/8の位置を基準に配置）
-        const yOffset = (index - (totalLines - 1) / 2) * 50; // 行間隔の調整
-        const yPos = `h-h/8-text_h/2+${yOffset}`;
         
-        drawtextFilters += `,drawtext=fontfile=font.otf:text='${escapedLine}':fontcolor=white:fontsize=h/22:x=(w-text_w)/2:y=${yPos}`;
+        // フォントサイズを「動画の横幅の1/16」に設定し、どんな解像度でも文字が重ならないように行間をその1.5倍で動的に計算
+        const offsetMultiplier = index - (totalLines - 1) / 2;
+        const yPos = `h-h/8-text_h/2+((w/16)*1.5)*${offsetMultiplier}`;
+        
+        drawtextFilters += `,drawtext=fontfile=font.otf:text='${escapedLine}':fontcolor=white:fontsize=w/16:x=(w-text_w)/2:y=${yPos}`;
       });
       
       // 画面下部に黒帯を引き、全てのdrawtextフィルタを適用
