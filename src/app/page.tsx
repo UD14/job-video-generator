@@ -246,19 +246,24 @@ export default function Home() {
         lines.push(telopText.slice(i, i + maxLen));
       }
       
-      // 分割した行ごとにdrawtextフィルタを作成し、連結する
+      // 分割した行ごとにdrawtextフィルタを作成し、均等な時間で順番に表示（切り替え）する
       let drawtextFilters = '';
       const totalLines = lines.length;
+      const duration = videoDuration || 10; // 万が一取得できなかった場合は10秒とする
+      const timePerChunk = duration / (totalLines || 1);
       
       lines.forEach((line, index) => {
         // FFmpegコマンドライン用にエスケープ処理
         const escapedLine = line.replace(/'/g, "\u2019").replace(/:/g, "\\:");
         
-        // フォントサイズを「動画の横幅の1/16」に設定し、どんな解像度でも文字が重ならないように行間をその1.5倍で動的に計算
-        const offsetMultiplier = index - (totalLines - 1) / 2;
-        const yPos = `h-h/8-text_h/2+((w/16)*1.5)*${offsetMultiplier}`;
+        // 常に1行しか表示されないため、黒帯（下部1/4）の「ど真ん中」にY座標を固定する
+        const yPos = `h-h/8-text_h/2`;
         
-        drawtextFilters += `,drawtext=fontfile=font.otf:text='${escapedLine}':fontcolor=white:fontsize=w/16:x=(w-text_w)/2:y=${yPos}`;
+        // 表示する開始時間と終了時間を計算
+        const startTime = index * timePerChunk;
+        const endTime = (index + 1) * timePerChunk;
+        
+        drawtextFilters += `,drawtext=fontfile=font.otf:text='${escapedLine}':fontcolor=white:fontsize=w/16:x=(w-text_w)/2:y=${yPos}:enable='between(t,${startTime},${endTime})'`;
       });
       
       // 画面下部に黒帯を引き、全てのdrawtextフィルタを適用
@@ -337,6 +342,16 @@ export default function Home() {
                     </a>
                   </div>
                 )}
+              </div>
+            )}
+            
+            {/* ▼ もう一度作成する ▼ の案内（出力結果があるときのみ表示） */}
+            {outputUrl && !isProcessing && (
+              <div className="flex flex-col items-center justify-center animate-bounce mt-2 mb-6">
+                <p className="text-blue-600 font-bold mb-1">もう一度作成する</p>
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
               </div>
             )}
 
