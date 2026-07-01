@@ -298,7 +298,7 @@ export default function Home() {
               
               {/* 1. 動画アップロード */}
               <div>
-                <label className="block text-sm font-semibold mb-2">1. 動画ファイルを選ぶ (.mp4)</label>
+                <label className="block text-sm font-semibold mb-2">1. 動画ファイルを選ぶ</label>
                 <input 
                   type="file" 
                   accept="video/mp4,video/quicktime" 
@@ -316,7 +316,7 @@ export default function Home() {
               {/* 2. AI文字起こし */}
               <div className="pt-4 border-t border-blue-200">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-semibold">2. 自動文字起こし (Hugging Face API)</label>
+                  <label className="block text-sm font-semibold">2. 自動文字起こし</label>
                   <button
                     onClick={transcribeAudio}
                     disabled={!videoFile || isTranscribing}
