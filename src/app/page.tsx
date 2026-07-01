@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { HfInference } from '@huggingface/inference';
 
 // --- ユーティリティ関数 ---
 
@@ -185,21 +184,29 @@ export default function Home() {
       const wavBlob = audioBufferToWav(audioBuffer);
       await audioContext.close();
       
-      setTranscribeProgress('AIクラウド(Hugging Face)に音声を送信中...');
+      setTranscribeProgress('AIクラウド(Groq LPU)に音声を送信中...');
       
       try {
-        const hf = new HfInference();
-        const result = await hf.automaticSpeechRecognition({
-          model: 'openai/whisper-tiny',
-          data: wavBlob,
+        const formData = new FormData();
+        formData.append('file', wavBlob, 'audio.wav');
+
+        const response = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: formData,
         });
 
-        if (!result || !result.text || !result.text.trim()) {
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `サーバー通信エラー (${response.status})`);
+        }
+
+        const data = await response.json();
+        if (!data.text || !data.text.trim()) {
           throw new Error('文字起こしの結果が空でした。');
         }
-        setTelopText(result.text.trim());
+        setTelopText(data.text.trim());
       } catch (apiError) {
-        console.warn('Hugging Face API通信エラー。安全装置（デモテキスト）を作動させます:', apiError);
+        console.warn('AIサーバー通信エラー。安全装置（デモテキスト）を作動させます:', apiError);
         const fallbackText = "これは自動テロップ合成ツールのデモンストレーションです。AIが動画の音声を認識し、このように完璧なタイミングで字幕を生成します。長い文章でも画面からはみ出ることなく、読みやすい長さで綺麗に表示されます。";
         setTelopText(fallbackText);
       }
