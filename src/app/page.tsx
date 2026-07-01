@@ -301,10 +301,28 @@ export default function Home() {
             {(isProcessing || outputUrl) && (
               <div className="p-6 bg-green-50 rounded-lg border border-green-200">
                 {isProcessing ? (
-                  <div className="flex flex-col items-center justify-center py-8">
+                  <div className="flex flex-col items-center justify-center py-8 w-full max-w-md mx-auto">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-4"></div>
-                    <p className="text-green-800 font-bold mb-2">動画を合成しています...</p>
-                    <p className="text-green-600 text-sm font-semibold">進捗: {progress}% (少し時間がかかります)</p>
+                    <p className="text-green-800 font-bold mb-4">動画を作成しています...</p>
+                    
+                    {/* おしゃれなプログレスバー */}
+                    <div className="w-full bg-green-200 rounded-full h-3 mb-2 overflow-hidden shadow-inner">
+                      <div 
+                        className="bg-green-600 h-3 rounded-full transition-all duration-300 ease-out relative"
+                        style={{ width: `${progress}%` }}
+                      >
+                        <div className="absolute top-0 left-0 bottom-0 right-0 bg-white/20 animate-pulse"></div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-between w-full text-xs font-bold text-green-700">
+                      <span>処理中</span>
+                      <span>{progress}%</span>
+                    </div>
+                    
+                    <p className="text-green-600 text-xs mt-4 opacity-80 text-center">
+                      ※ ブラウザ内で安全に処理しているため少し時間がかかります
+                    </p>
                   </div>
                 ) : (
                   <div>
