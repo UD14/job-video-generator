@@ -227,6 +227,9 @@ export default function Home() {
   const processVideo = async () => {
     if (!videoFile) return;
     
+    // 処理開始時に画面一番上（ローディング画面）へスクロール
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
     setIsProcessing(true);
     setProgress(0);
     
@@ -293,6 +296,31 @@ export default function Home() {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* 処理中 or 出力結果セクション（タイトルの直下に配置） */}
+            {(isProcessing || outputUrl) && (
+              <div className="p-6 bg-green-50 rounded-lg border border-green-200">
+                {isProcessing ? (
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-4"></div>
+                    <p className="text-green-800 font-bold mb-2">動画を合成しています...</p>
+                    <p className="text-green-600 text-sm font-semibold">進捗: {progress}% (少し時間がかかります)</p>
+                  </div>
+                ) : (
+                  <div>
+                    <h2 className="text-xl font-bold text-green-800 mb-4">✨ 動画が完成しました！</h2>
+                    <video src={outputUrl!} controls className="w-full rounded-lg shadow-md mb-4" />
+                    <a 
+                      href={outputUrl!} 
+                      download={`output_${Date.now()}.mp4`}
+                      className="block text-center w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors"
+                    >
+                      動画をダウンロードする
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 入力フォーム */}
             <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 space-y-6">
               
@@ -333,12 +361,12 @@ export default function Home() {
                   ※アップロードされた動画や音声データは文字起こし専用のセキュアなサーバーで処理され、外部に公開・保存・流出されることは一切ありません。
                 </p>
                 <textarea 
-                  value={telopText}
-                  onChange={(e) => setTelopText(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  rows={3}
-                  placeholder="アピールポイントやテロップを入力してください"
-                />
+                   value={telopText}
+                   onChange={(e) => setTelopText(e.target.value)}
+                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                   rows={3}
+                   placeholder="アピールポイントやテロップを入力してください"
+                 />
               </div>
 
               {/* 3. 動画合成 */}
@@ -349,25 +377,10 @@ export default function Home() {
                   className={`w-full py-3 px-4 rounded-lg font-bold text-white transition-colors
                     ${(!videoFile || isProcessing || isTranscribing) ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
-                  {isProcessing ? `処理中... ${progress}%` : '3. テロップを合成して動画を作成'}
+                  {isProcessing ? `処理中...` : '3. テロップを合成して動画を作成'}
                 </button>
               </div>
             </div>
-
-            {/* 出力結果 */}
-            {outputUrl && (
-              <div className="mt-8 p-6 bg-green-50 rounded-lg border border-green-200">
-                <h2 className="text-xl font-bold text-green-800 mb-4">✨ 動画が完成しました！</h2>
-                <video src={outputUrl} controls className="w-full rounded-lg shadow-md mb-4" />
-                <a 
-                  href={outputUrl} 
-                  download={`output_${Date.now()}.mp4`}
-                  className="block text-center w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors"
-                >
-                  動画をダウンロードする
-                </a>
-              </div>
-            )}
           </div>
         )}
       </div>
